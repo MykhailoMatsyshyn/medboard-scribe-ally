@@ -1,9 +1,3 @@
--- Create trigger to auto-create profile on new user signup
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION public.handle_new_user();
-
 -- Add missing INSERT policy on profiles so users can create their own profile
 -- (also needed for the trigger to work correctly with RLS)
 CREATE POLICY "Users can insert own profile"
