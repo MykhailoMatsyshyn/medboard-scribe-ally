@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS enhance_prompt_template TEXT NOT NULL DEFAULT 'Rewrite the following user question to be clearer, more specific, and well-structured for an AI medical assistant. Preserve the original intent and language. Return only the improved question with no preamble.';
