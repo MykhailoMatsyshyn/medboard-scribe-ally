@@ -11,9 +11,6 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const OPENROUTER_MODEL = Deno.env.get("OPENROUTER_MODEL") ?? "openai/gpt-4o-mini";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Lovable gateway is kept for embeddings only (OpenRouter has no /embeddings endpoint)
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -56,23 +53,20 @@ const chatTool = {
   },
 };
 
+// Supabase Edge runtime ships a built-in gte-small model (384-dim) — embeddings are
+// computed locally, with no external API or key.
+declare const Supabase: {
+  ai: { Session: new (model: string) => { run: (input: string, opts: { mean_pool: boolean; normalize: boolean }) => Promise<number[]> } };
+};
+const embeddingSession = new Supabase.ai.Session("gte-small");
+
 async function embed(text: string): Promise<number[] | null> {
-  if (!LOVABLE_API_KEY) return null;
-  const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "google/gemini-embedding-001",
-      input: text,
-      dimensions: 768,
-    }),
-  });
-  if (!r.ok) {
-    console.error("embed failed", r.status, await r.text());
+  try {
+    return await embeddingSession.run(text, { mean_pool: true, normalize: true });
+  } catch (e) {
+    console.error("embed failed", e);
     return null;
   }
-  const j = await r.json();
-  return j.data?.[0]?.embedding ?? null;
 }
 
 Deno.serve(async (req) => {

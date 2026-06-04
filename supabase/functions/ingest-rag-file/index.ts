@@ -6,7 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -24,25 +23,22 @@ function chunkText(text: string, size = 1200, overlap = 150): string[] {
   return chunks;
 }
 
+// Supabase Edge runtime ships a built-in gte-small model (384-dim) — embeddings are
+// computed locally, with no external API or key.
+declare const Supabase: {
+  ai: { Session: new (model: string) => { run: (input: string, opts: { mean_pool: boolean; normalize: boolean }) => Promise<number[]> } };
+};
+const embeddingSession = new Supabase.ai.Session("gte-small");
+
 async function embedBatch(inputs: string[]): Promise<(number[] | null)[]> {
   const out: (number[] | null)[] = [];
-  // Embed sequentially to avoid rate limits; small batches typical
   for (const input of inputs) {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-embedding-001",
-        input,
-        dimensions: 768,
-      }),
-    });
-    if (!r.ok) {
-      console.error("embed err", r.status, await r.text());
+    try {
+      const embedding = await embeddingSession.run(input, { mean_pool: true, normalize: true });
+      out.push(embedding);
+    } catch (e) {
+      console.error("embed err", e);
       out.push(null);
-    } else {
-      const j = await r.json();
-      out.push(j.data?.[0]?.embedding ?? null);
     }
   }
   return out;
