@@ -1,7 +1,7 @@
 import React from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { MessageSquare, Plus, Clock, ChevronRight, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { MessageSquare, Plus, Clock, PanelLeftClose, PanelLeft, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ChatSession {
@@ -17,6 +17,7 @@ interface ChatHistorySidebarProps {
   onToggle: () => void;
   sessions?: ChatSession[];
   onSelectSession?: (sessionId: string) => void;
+  onDeleteSession?: (sessionId: string) => void;
   onNewChat?: () => void;
   footer?: React.ReactNode;
 }
@@ -28,6 +29,7 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
   onToggle,
   sessions = mockSessions,
   onSelectSession,
+  onDeleteSession,
   onNewChat,
   footer,
 }) => {
@@ -71,46 +73,54 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
       <ScrollArea className={cn("flex-1", !isOpen && "hidden")}>
         <div className="p-3 space-y-1">
           {sessions.map((session) => (
-            <button
+            <div
               key={session.id}
-              onClick={() => onSelectSession?.(session.id)}
               className={cn(
-                "w-full text-left p-3 rounded-xl transition-all duration-150 group",
+                "relative group rounded-xl transition-all duration-150",
                 session.isActive
                   ? "bg-primary/10 border border-primary/20"
                   : "hover:bg-accent border border-transparent"
               )}
             >
-              <div className="flex items-start gap-3">
-                <div className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
-                  session.isActive ? "bg-primary/20" : "bg-muted"
-                )}>
-                  <MessageSquare className={cn(
-                    "w-4 h-4",
-                    session.isActive ? "text-primary" : "text-muted-foreground"
-                  )} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className={cn(
-                      "text-sm font-medium truncate",
-                      session.isActive ? "text-foreground" : "text-foreground"
-                    )}>
-                      {session.title}
-                    </p>
-                    <ChevronRight className={cn(
-                      "w-4 h-4 flex-shrink-0 transition-opacity",
-                      session.isActive 
-                        ? "text-primary opacity-100" 
-                        : "text-muted-foreground opacity-0 group-hover:opacity-100"
+              <button
+                onClick={() => onSelectSession?.(session.id)}
+                className="w-full text-left p-3 pr-9"
+              >
+                <div className="flex items-start gap-3">
+                  <div className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                    session.isActive ? "bg-primary/20" : "bg-muted"
+                  )}>
+                    <MessageSquare className={cn(
+                      "w-4 h-4",
+                      session.isActive ? "text-primary" : "text-muted-foreground"
                     )} />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{session.date}</p>
-                  <p className="text-xs text-muted-foreground truncate mt-1">{session.preview}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate text-foreground">
+                      {session.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{session.date}</p>
+                    {session.preview && (
+                      <p className="text-xs text-muted-foreground truncate mt-1">{session.preview}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              {onDeleteSession && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteSession(session.id);
+                  }}
+                  className="absolute right-2 top-2 h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-opacity"
+                  title="Delete chat"
+                  aria-label="Delete chat"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </ScrollArea>

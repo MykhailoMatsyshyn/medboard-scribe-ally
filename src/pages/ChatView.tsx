@@ -212,6 +212,25 @@ const ChatView: React.FC = () => {
     if (id !== activeConversationId) setActiveConversationId(id);
   };
 
+  const handleDeleteSession = async (id: string) => {
+    if (!window.confirm('Delete this conversation? This cannot be undone.')) return;
+
+    // Messages cascade-delete via the conversation_id foreign key.
+    const { error } = await supabase.from('conversations').delete().eq('id', id);
+    if (error) {
+      console.error('deleteConversation error', error);
+      toast.error('Failed to delete conversation');
+      return;
+    }
+
+    const remaining = conversations.filter((c) => c.id !== id);
+    setConversations(remaining);
+    if (id === activeConversationId) {
+      setActiveConversationId(remaining.length > 0 ? remaining[0].id : null);
+    }
+    toast.success('Conversation deleted');
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -247,6 +266,7 @@ const ChatView: React.FC = () => {
           onToggle={() => setHistoryOpen(!historyOpen)}
           sessions={sidebarSessions}
           onSelectSession={handleSelectSession}
+          onDeleteSession={handleDeleteSession}
           onNewChat={handleNewChat}
           footer={<UserDropdown variant="sidebar" />}
         />
