@@ -18,28 +18,19 @@ interface Message {
   content: string;
 }
 
-interface ChatSession {
+interface Conversation {
   id: string;
   title: string;
-  date: string;
-  preview: string;
-  messages: Message[];
+  created_at: string;
+  updated_at: string;
 }
 
-const initialMessage: Message = {
-  id: '1',
+const WELCOME_MESSAGE: Message = {
+  id: 'welcome',
   role: 'assistant',
   content:
-    "Hi! Ask me anything. I'll answer in formatted markdown (with tables when useful). If you've uploaded files to your knowledge base in **Account → Profile**, I'll use them to ground my answers.",
+    "Hi! Ask me anything. I'll answer in formatted markdown (with tables when useful). If you've uploaded files to your knowledge base, I'll use them to ground my answers.",
 };
-
-const makeSession = (): ChatSession => ({
-  id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-  title: 'New chat',
-  date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-  preview: 'No messages yet',
-  messages: [initialMessage],
-});
 
 const ChatView: React.FC = () => {
   const navigate = useNavigate();
@@ -51,50 +42,128 @@ const ChatView: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [historyOpen, setHistoryOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
-  const initialSession = makeSession();
-  const [sessions, setSessions] = useState<ChatSession[]>([initialSession]);
-  const [activeSessionId, setActiveSessionId] = useState<string>(initialSession.id);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
-  const messages = activeSession?.messages ?? [initialMessage];
-
+  // Load conversation list on mount
   useEffect(() => {
-    const initialPrompt = location.state?.initialPrompt;
-    if (initialPrompt) {
-      handleSendMessage(initialPrompt);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!user) return;
+    loadConversations();
+  }, [user]);
 
+  // Load messages when active conversation changes
+  useEffect(() => {
+    if (!activeConversationId) {
+      setMessages([WELCOME_MESSAGE]);
+      return;
+    }
+    loadMessages(activeConversationId);
+  }, [activeConversationId]);
+
+  // Auto-scroll on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  const updateActiveSession = (updater: (s: ChatSession) => ChatSession) => {
-    setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? updater(s) : s)));
+  // Handle initial prompt passed via navigation state
+  useEffect(() => {
+    const initialPrompt = location.state?.initialPrompt;
+    if (initialPrompt && !isLoadingConversations) {
+      handleSendMessage(initialPrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoadingConversations]);
+
+  const loadConversations = async () => {
+    setIsLoadingConversations(true);
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, title, created_at, updated_at')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('loadConversations error', error);
+    } else if (data) {
+      setConversations(data as Conversation[]);
+      if (data.length > 0) setActiveConversationId(data[0].id);
+    }
+    setIsLoadingConversations(false);
+  };
+
+  const loadMessages = async (conversationId: string) => {
+    setIsLoadingMessages(true);
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, role, content')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('loadMessages error', error);
+      setMessages([WELCOME_MESSAGE]);
+    } else {
+      setMessages(data && data.length > 0 ? (data as Message[]) : [WELCOME_MESSAGE]);
+    }
+    setIsLoadingMessages(false);
+  };
+
+  const createConversation = async (title: string): Promise<string | null> => {
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({ user_id: user!.id, title })
+      .select('id, title, created_at, updated_at')
+      .single();
+
+    if (error || !data) {
+      console.error('createConversation error', error);
+      return null;
+    }
+    setConversations((prev) => [data as Conversation, ...prev]);
+    return data.id;
   };
 
   const handleSendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: trimmed,
-    };
-    const nextMessages = [...messages, userMessage];
-    updateActiveSession((s) => ({
-      ...s,
-      messages: nextMessages,
-      title: s.title === 'New chat' ? trimmed.slice(0, 40) : s.title,
-      preview: trimmed.slice(0, 60),
-    }));
     setInputValue('');
     setIsLoading(true);
 
     try {
+      // Create a conversation if none is active yet
+      let convId = activeConversationId;
+      if (!convId) {
+        convId = await createConversation(trimmed.slice(0, 50));
+        if (!convId) throw new Error('Failed to create conversation');
+        setActiveConversationId(convId);
+      }
+
+      // Persist user message
+      const { data: userMsgData, error: userMsgError } = await supabase
+        .from('messages')
+        .insert({ conversation_id: convId, user_id: user!.id, role: 'user', content: trimmed })
+        .select('id, role, content')
+        .single();
+      if (userMsgError) throw userMsgError;
+
+      const userMessage = userMsgData as Message;
+      const nextMessages = [...messages.filter((m) => m.id !== 'welcome'), userMessage];
+      setMessages(nextMessages);
+
+      // Update conversation title on first real message
+      const conv = conversations.find((c) => c.id === convId);
+      if (conv && conv.title === 'New chat') {
+        const newTitle = trimmed.slice(0, 50);
+        await supabase.from('conversations').update({ title: newTitle }).eq('id', convId);
+        setConversations((prev) =>
+          prev.map((c) => (c.id === convId ? { ...c, title: newTitle } : c))
+        );
+      }
+
+      // Call chat edge function
       const { data, error } = await supabase.functions.invoke('chat', {
         body: {
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -105,30 +174,42 @@ const ChatView: React.FC = () => {
         toast.error(data.error);
         return;
       }
+
       const reply: string = data?.reply ?? '';
-      updateActiveSession((s) => ({
-        ...s,
-        messages: [
-          ...s.messages,
-          { id: (Date.now() + 1).toString(), role: 'assistant', content: reply },
-        ],
-      }));
-    } catch (err: any) {
+
+      // Persist assistant reply
+      const { data: asstMsgData, error: asstMsgError } = await supabase
+        .from('messages')
+        .insert({ conversation_id: convId, user_id: user!.id, role: 'assistant', content: reply })
+        .select('id, role, content')
+        .single();
+      if (asstMsgError) throw asstMsgError;
+
+      setMessages((prev) => [...prev, asstMsgData as Message]);
+
+      // Bump conversation to top of sidebar
+      setConversations((prev) =>
+        prev
+          .map((c) =>
+            c.id === convId ? { ...c, updated_at: new Date().toISOString() } : c
+          )
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      );
+    } catch (err: unknown) {
       console.error(err);
-      toast.error(err?.message || 'Failed to get a response');
+      toast.error(err instanceof Error ? err.message : 'Failed to get a response');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleNewChat = () => {
-    const s = makeSession();
-    setSessions((prev) => [s, ...prev]);
-    setActiveSessionId(s.id);
+  const handleNewChat = async () => {
+    const convId = await createConversation('New chat');
+    if (convId) setActiveConversationId(convId);
   };
 
   const handleSelectSession = (id: string) => {
-    setActiveSessionId(id);
+    if (id !== activeConversationId) setActiveConversationId(id);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -147,12 +228,12 @@ const ChatView: React.FC = () => {
   }
   if (!user) return <Navigate to="/auth" replace />;
 
-  const sidebarSessions = sessions.map((s) => ({
-    id: s.id,
-    title: s.title,
-    date: s.date,
-    preview: s.preview,
-    isActive: s.id === activeSessionId,
+  const sidebarSessions = conversations.map((c) => ({
+    id: c.id,
+    title: c.title,
+    date: new Date(c.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    preview: '',
+    isActive: c.id === activeConversationId,
   }));
 
   return (
@@ -187,15 +268,21 @@ const ChatView: React.FC = () => {
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 space-y-4">
-          {messages.map((message) => (
-            <ChatBubble key={message.id} role={message.role}>
-              {message.role === 'assistant' ? (
-                <MarkdownMessage content={message.content} />
-              ) : (
-                <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-              )}
-            </ChatBubble>
-          ))}
+          {isLoadingMessages ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            messages.map((message) => (
+              <ChatBubble key={message.id} role={message.role}>
+                {message.role === 'assistant' ? (
+                  <MarkdownMessage content={message.content} />
+                ) : (
+                  <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                )}
+              </ChatBubble>
+            ))
+          )}
           {isLoading && (
             <ChatBubble role="assistant">
               <div className="flex items-center gap-2 text-muted-foreground text-sm">
