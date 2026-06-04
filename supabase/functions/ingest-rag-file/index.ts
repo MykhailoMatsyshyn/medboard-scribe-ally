@@ -84,8 +84,10 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "No text extracted from file" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Cap to a reasonable max to avoid runaway cost
-    const MAX_CHUNKS = 200;
+    // gte-small runs on the Edge Function's own CPU, so embedding many chunks in a
+    // single invocation can exceed the worker resource limit. Cap per upload to stay
+    // within budget (enough for typical test documents).
+    const MAX_CHUNKS = 8;
     const trimmed = chunks.slice(0, MAX_CHUNKS);
 
     const embeddings = await embedBatch(trimmed);
