@@ -93,7 +93,12 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({ onSwitchUser, varian
   };
 
   const currentUserEmail = user?.email;
-  const displayName = impersonation ? impersonation.targetDisplayName : currentUserEmail;
+  const ownProfile = profiles.find((p) => p.user_id === user?.id);
+  const ownName = ownProfile?.display_name?.trim();
+  // Show the display name when set, otherwise fall back to the account email.
+  const displayName = impersonation
+    ? impersonation.targetDisplayName
+    : (ownName || currentUserEmail);
 
   if (!user) {
     return (
