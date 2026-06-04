@@ -6,12 +6,58 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+// OpenRouter config — model is swappable via env var
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
+const OPENROUTER_MODEL = Deno.env.get("OPENROUTER_MODEL") ?? "openai/gpt-4o-mini";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+// Lovable gateway is kept for embeddings only (OpenRouter has no /embeddings endpoint)
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Retry on transient failures as required by §3.3
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 529]);
+const MAX_RETRIES = 3;
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(url, init);
+    if (response.ok || !RETRYABLE_STATUSES.has(response.status)) return response;
+    lastError = new Error(`OpenRouter error (${response.status}): ${await response.text()}`);
+    if (attempt < MAX_RETRIES) {
+      const retryAfter = response.headers.get("retry-after");
+      const delay = retryAfter ? Number(retryAfter) * 1000 : 1000 * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError!;
+}
+
+// One tool — its parameters are the typed shape we want back from the model
+const chatTool = {
+  type: "function" as const,
+  function: {
+    name: "answer",
+    description: "Answer the user's health question.",
+    parameters: {
+      type: "object",
+      properties: {
+        reply: {
+          type: "string",
+          description: "The answer in Markdown. Use tables when they help.",
+        },
+      },
+      required: ["reply"],
+    },
+  },
+};
+
 async function embed(text: string): Promise<number[] | null> {
+  if (!LOVABLE_API_KEY) return null;
   const r = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
     method: "POST",
     headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
@@ -61,7 +107,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // RAG: embed last user message and retrieve top chunks
+    // RAG: embed last user message and retrieve top chunks from knowledge base
     const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
     let context = "";
     if (lastUser?.content) {
@@ -82,46 +128,52 @@ Deno.serve(async (req) => {
       }
     }
 
-    const systemPrompt = `You are a helpful AI assistant. Always respond in well-formatted Markdown. Use tables (GitHub-flavored markdown) whenever the data is tabular. Use headings, lists, bold, and code blocks where appropriate.${
+    const systemPrompt = `You are a helpful AI health assistant. Always respond in well-formatted Markdown. Use tables (GitHub-flavored markdown) whenever the data is tabular. Use headings, lists, bold, and code blocks where appropriate.${
       context
         ? `\n\nThe user has uploaded a personal knowledge base. Use the following retrieved excerpts to ground your answer when relevant. If the answer is not in the context, say so and answer from general knowledge.\n\n=== KNOWLEDGE BASE CONTEXT ===\n${context}\n=== END CONTEXT ===`
         : ""
     }`;
 
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // One OpenRouter call — force the tool, answer arrives as typed JSON in tool_calls
+    const res = await fetchWithRetry(OPENROUTER_API_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://medboard-scribe-ally.vercel.app",
+        "X-Title": "Health Companion",
+      },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: OPENROUTER_MODEL,
         messages: [{ role: "system", content: systemPrompt }, ...messages],
+        tools: [chatTool],
+        tool_choice: { type: "function", function: { name: "answer" } },
       }),
     });
 
-    if (!r.ok) {
-      const text = await r.text();
-      console.error("AI error", r.status, text);
-      if (r.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Try again shortly." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (r.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("OpenRouter error", res.status, text);
       return new Response(JSON.stringify({ error: "AI request failed" }), {
+        status: res.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const data = await res.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) {
+      console.error("No tool call in response", JSON.stringify(data));
+      return new Response(JSON.stringify({ error: "No tool call returned" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const data = await r.json();
-    const reply = data.choices?.[0]?.message?.content ?? "";
+    // Read typed result from tool_calls[0].function.arguments — never free text
+    const result = JSON.parse(toolCall.function.arguments) as { reply: string };
 
-    return new Response(JSON.stringify({ reply, usedContext: !!context }), {
+    return new Response(JSON.stringify({ reply: result.reply, usedContext: !!context }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
