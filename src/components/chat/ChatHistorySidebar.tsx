@@ -1,5 +1,4 @@
 import React from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { MessageSquare, Plus, Clock, PanelLeftClose, PanelLeft, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -36,7 +35,7 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
   return (
     <div className={cn(
       "h-full bg-card border-r border-border flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
-      isOpen ? "w-72" : "w-0"
+      isOpen ? "w-64" : "w-0"
     )}>
       {/* Header */}
       <div className={cn(
@@ -70,7 +69,7 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
       </div>
 
       {/* Sessions List */}
-      <ScrollArea className={cn("flex-1", !isOpen && "hidden")}>
+      <div className={cn("flex-1 overflow-y-auto", !isOpen && "hidden")}>
         <div className="p-3 space-y-1">
           {sessions.map((session) => (
             <div
@@ -123,7 +122,7 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
             </div>
           ))}
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Footer (user menu) */}
       {footer && (
