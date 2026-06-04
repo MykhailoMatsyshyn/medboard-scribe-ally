@@ -101,7 +101,7 @@ const SettingsPage: React.FC = () => {
 
   if (authLoading || profileLoading) {
     return (
-      <AppShell title="Profile" showBack onBack={handleBack} backTooltip="Go back to chat">
+      <AppShell title="Profile" showBack onBack={handleBack} backTooltip="Go back to chat" scrollable>
         <div className="flex items-center justify-center min-h-[60vh]">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
@@ -110,7 +110,7 @@ const SettingsPage: React.FC = () => {
   }
 
   return (
-    <AppShell title="Profile" showBack onBack={handleBack} backTooltip="Go back to chat">
+    <AppShell title="Profile" showBack onBack={handleBack} backTooltip="Go back to chat" scrollable>
       <div className="container max-w-2xl mx-auto py-8 px-4 space-y-6">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>

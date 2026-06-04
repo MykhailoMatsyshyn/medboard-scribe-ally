@@ -127,6 +127,7 @@ const AdminView: React.FC = () => {
       showBack
       onBack={() => navigate('/')}
       backTooltip="Back to home"
+      scrollable
     >
       <div className="flex-1 flex flex-col p-6 max-w-6xl mx-auto w-full">
         {/* Header */}

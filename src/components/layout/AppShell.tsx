@@ -20,6 +20,9 @@ interface AppShellProps {
   sidebar?: React.ReactNode;
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  /** Let the main area scroll vertically. Use for plain content pages (settings,
+   *  knowledge base). Leave off for pages that manage their own scroll (chat). */
+  scrollable?: boolean;
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ 
@@ -32,7 +35,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   onSwitchUser,
   sidebar,
   sidebarOpen,
-  onToggleSidebar
+  onToggleSidebar,
+  scrollable = false
 }) => {
   return (
     <div className="h-screen bg-surface-subtle flex flex-col overflow-hidden">
@@ -108,7 +112,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       {/* Main Content with Sidebar */}
       <div className="flex-1 flex overflow-hidden">
         {sidebar}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className={`flex-1 ${scrollable ? "overflow-y-auto" : "flex flex-col overflow-hidden"}`}>
           {children}
         </main>
       </div>
