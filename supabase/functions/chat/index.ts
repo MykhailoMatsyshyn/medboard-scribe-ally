@@ -53,22 +53,6 @@ const chatTool = {
   },
 };
 
-// Supabase Edge runtime ships a built-in gte-small model (384-dim) — embeddings are
-// computed locally, with no external API or key.
-declare const Supabase: {
-  ai: { Session: new (model: string) => { run: (input: string, opts: { mean_pool: boolean; normalize: boolean }) => Promise<number[]> } };
-};
-const embeddingSession = new Supabase.ai.Session("gte-small");
-
-async function embed(text: string): Promise<number[] | null> {
-  try {
-    return await embeddingSession.run(text, { mean_pool: true, normalize: true });
-  } catch (e) {
-    console.error("embed failed", e);
-    return null;
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -101,24 +85,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    // RAG: embed last user message and retrieve top chunks from knowledge base
+    // RAG: full-text search the user's knowledge base for chunks relevant to the question.
     const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
     let context = "";
     if (lastUser?.content) {
-      const qvec = await embed(String(lastUser.content).slice(0, 4000));
-      if (qvec) {
-        const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-        const { data: matches, error } = await admin.rpc("match_rag_chunks", {
-          query_embedding: qvec as any,
-          match_user_id: user.id,
-          match_count: 6,
-        });
-        if (error) console.error("match error", error);
-        if (matches && matches.length) {
-          context = matches
-            .map((m: any, i: number) => `[Source ${i + 1}]\n${m.content}`)
-            .join("\n\n---\n\n");
-        }
+      const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      const { data: matches, error } = await admin.rpc("match_rag_chunks", {
+        query_text: String(lastUser.content).slice(0, 1000),
+        match_user_id: user.id,
+        match_count: 6,
+      });
+      if (error) console.error("match error", error);
+      if (matches && matches.length) {
+        context = matches
+          .map((m: any, i: number) => `[Source ${i + 1}]\n${m.content}`)
+          .join("\n\n---\n\n");
       }
     }
 

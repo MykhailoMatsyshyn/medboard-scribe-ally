@@ -23,27 +23,6 @@ function chunkText(text: string, size = 1200, overlap = 150): string[] {
   return chunks;
 }
 
-// Supabase Edge runtime ships a built-in gte-small model (384-dim) — embeddings are
-// computed locally, with no external API or key.
-declare const Supabase: {
-  ai: { Session: new (model: string) => { run: (input: string, opts: { mean_pool: boolean; normalize: boolean }) => Promise<number[]> } };
-};
-const embeddingSession = new Supabase.ai.Session("gte-small");
-
-async function embedBatch(inputs: string[]): Promise<(number[] | null)[]> {
-  const out: (number[] | null)[] = [];
-  for (const input of inputs) {
-    try {
-      const embedding = await embeddingSession.run(input, { mean_pool: true, normalize: true });
-      out.push(embedding);
-    } catch (e) {
-      console.error("embed err", e);
-      out.push(null);
-    }
-  }
-  return out;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -84,26 +63,15 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "No text extracted from file" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // gte-small runs on the Edge Function's own CPU, so embedding many chunks in a
-    // single invocation can exceed the worker resource limit. Cap per upload to stay
-    // within budget (enough for typical test documents).
-    const MAX_CHUNKS = 8;
-    const trimmed = chunks.slice(0, MAX_CHUNKS);
-
-    const embeddings = await embedBatch(trimmed);
-
-    const rows = trimmed.map((content, idx) => ({
+    // Full-text search indexes the chunk text in Postgres (a generated tsvector column),
+    // so ingest only stores text — no per-chunk model inference and no CPU-time limits.
+    const MAX_CHUNKS = 200;
+    const rows = chunks.slice(0, MAX_CHUNKS).map((content, idx) => ({
       user_id: user.id,
       file_id,
       chunk_index: idx,
       content,
-      embedding: embeddings[idx] as any,
-    })).filter((r) => r.embedding);
-
-    if (rows.length === 0) {
-      await admin.from("rag_files").update({ status: "error", error_message: "Embedding failed" }).eq("id", file_id);
-      return new Response(JSON.stringify({ error: "Embedding failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
+    }));
 
     // Clear any prior chunks (re-ingest case)
     await admin.from("rag_chunks").delete().eq("file_id", file_id);
