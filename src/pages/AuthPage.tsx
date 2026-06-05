@@ -16,6 +16,7 @@ const AuthPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -46,7 +47,7 @@ const AuthPage: React.FC = () => {
         if (error) throw error;
         toast({ title: 'Welcome back!' });
       } else {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -57,7 +58,22 @@ const AuthPage: React.FC = () => {
           },
         });
         if (error) throw error;
-        toast({ title: 'Account created successfully!' });
+        // Supabase returns a user with no identities when the email is already
+        // registered (email-enumeration protection); no confirmation email is sent.
+        if (data.user && data.user.identities && data.user.identities.length === 0) {
+          toast({ title: 'Account already exists', description: 'Please sign in instead.', variant: 'destructive' });
+          setIsLogin(true);
+          setPassword('');
+          return;
+        }
+        if (data.session) {
+          // Email confirmation is disabled — the user is signed in immediately and
+          // onAuthStateChange handles the redirect.
+          toast({ title: 'Account created!' });
+        } else {
+          // Confirmation required — surface a "check your email" state.
+          setPendingEmail(email);
+        }
       }
     } catch (error: any) {
       const message = error.message || 'An error occurred';
@@ -93,6 +109,34 @@ const AuthPage: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  if (pendingEmail) {
+    return (
+      <div className="min-h-screen bg-surface-subtle flex flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6 animate-fade-in text-center">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+            <Mail className="w-8 h-8 text-primary" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">Check your email</h1>
+          <p className="text-muted-foreground">
+            We sent a confirmation link to{' '}
+            <span className="font-medium text-foreground">{pendingEmail}</span>. Click it to
+            activate your account, then sign in.
+          </p>
+          <Button
+            className="w-full"
+            onClick={() => {
+              setPendingEmail(null);
+              setIsLogin(true);
+              setPassword('');
+            }}
+          >
+            Back to sign in
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-surface-subtle flex flex-col items-center justify-center px-4">
